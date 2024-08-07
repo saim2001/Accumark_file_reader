@@ -1,4 +1,5 @@
 import re
+import json
 import xml.etree.ElementTree as ET
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
@@ -73,7 +74,8 @@ def extract_data(content):
         "L": length,
         "U": u_value,
         "PERIM": perim_value_wihtout_CM,
-        "LBMK": lbmk
+        "LBMK": lbmk,
+        "LBMK_full" : lbmk_value
     }
 
 # Main function to tie it all together
@@ -101,30 +103,54 @@ def change_extension(file_path, new_extension):
     new_file_path = base_name + "." + new_extension
     os.rename(file_path, new_file_path)
     return new_file_path
-def find_and_edit_excel(data,ws):
+def find_and_edit_excel(data,appended_items,ws):
     # Define the column to search and the substring
-    column_letter = 'A'  # Column to search in
+    header_row = 1
+# Populate headers-to-columns.
+    fields = {}
+    for cnum in range(1, ws.max_column + 1):
+        field = ws.cell(row=header_row, column=cnum).value
+        fields[field] = cnum
     substring = data['LBMK']  # Substring to search for
     percentage_style = NamedStyle(name='percentage_style', number_format='0.00%')
     number_style = NamedStyle(name='number_style', number_format='0.00')
+    pattern = re.compile(r'^LN')
+    linning = bool(pattern.match(data['LBMK_full']))
     # Iterate through the cells in the column
-    for cell in ws[column_letter]:
-        if substring in str(cell.value):  # Check if the substring is in the cell's value
-            row = cell.row
+    for row_num in range(header_row + 1, ws.max_row + 1):
+        job = ws.cell(row=row_num, column=fields['Job #']).value
+        cut = ws.cell(row=row_num, column=fields['Cut #']).value
+        concatenate = ws.cell(row=row_num, column=fields['Concatenate']).value
+        job_cut = str(job) + str(cut)
+        
+        unique = job_cut + str(data['L']) +str(data['U'])
+        
+        # if (linning ==True) and ("Lining" in concatenate):
+        #     pass
+        # else:
+        #     continue
+        if (substring == job_cut) and (row_num not in appended_items):  # Check if the substring is in the cell's value
             # Edit cells in the same row
-            ws[f'H{row}'] = data['L']  # Modify cell B in the found row
-            ws[f'H{row}'].style  = percentage_style
-            ws[f'I{row}'] = data['U']
-            ws[f'I{row}'].style  = number_style
-            ws[f'Q{row}'] = data['PERIM']
-            ws[f'Q{row}'].style  = number_style # Modify cell C in the found row
+            if (linning ==True):
+                if ("Lining" in concatenate):
+                    pass
+                else:
+                    continue
+            ws.cell(row=row_num, column=fields['Marker Length']).value = data['L']  # Modify cell B in the found row
+            ws.cell(row=row_num, column=fields['Marker Length']).style= number_style
+            ws.cell(row=row_num, column=fields['Marker Utilization']).value= data['U']
+            ws.cell(row=row_num, column=fields['Marker Utilization']).style  = percentage_style
+            ws.cell(row=row_num, column=fields['PARAMETER']).value= data['PERIM']
+            ws.cell(row=row_num, column=fields['PARAMETER']).style  = number_style # Modify cell C in the found row
+            appended_items.append(row_num)
             break  # Exit loop once the substring is found (remove if you want to find multiple occurrences)
-
+    return row_num
 
 def main(directory_path,excel_file_path):
     # Load the workbook
     wb = load_workbook(excel_file_path)
-    
+    data_json = {}
+    appended_items = []
     # Select the active sheet
     sheet = wb['Sheet1']
 
@@ -139,12 +165,16 @@ def main(directory_path,excel_file_path):
                 content = file.read()
             if content:
                 extracted_data = extract_data(content)
+                data_json[f'{filename}'] = extracted_data
                 for key, value in extracted_data.items():
                     print(f"{key}: {value}")
-                    find_and_edit_excel(extracted_data,sheet)
+                insert = find_and_edit_excel(extracted_data,appended_items,sheet)
+                extracted_data['unique_id'] = insert
+
             else:
                 print("Failed to extract data due to file reading error.")
-
+    with open('log.json','w') as json_logs:
+        json_logs.write(json.dumps(data_json,indent=4))
     wb.save(f'updated_{os.path.basename(excel_file_path)}')
 # Replace 'path/to/your/file.xml' with the actual path to your XML file
 
